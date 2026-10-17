@@ -1,0 +1,18 @@
+#!/bin/sh
+# Runs the native binary from the platform package npm installed next to this one.
+# Needs no Node or Bun at run time.
+self=$(readlink -f "$0" 2>/dev/null || realpath "$0")
+root=$(dirname "$(dirname "$self")")
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) target=linux-x64 ;;
+  Linux-aarch64 | Linux-arm64) target=linux-arm64 ;;
+  Darwin-x86_64) target=darwin-x64 ;;
+  Darwin-arm64) target=darwin-arm64 ;;
+  *) echo "preview: no build for $(uname -s) $(uname -m)" >&2; exit 1 ;;
+esac
+# Nested (npm global), hoisted (npm, Bun, pnpm's virtual store).
+for dir in "$root/node_modules/@runablehq/preview-$target" "$root/../preview-$target"; do
+  [ -x "$dir/bin/preview" ] && exec "$dir/bin/preview" "$@"
+done
+echo "preview: @runablehq/preview-$target is missing; reinstall @runablehq/preview" >&2
+exit 1

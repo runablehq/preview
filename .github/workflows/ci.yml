@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - name: shellcheck
+        run: shellcheck -s sh npm/preview/bin/preview scripts/install.sh scripts/pack-npm.sh && shellcheck tests/smoke.sh
+
+  # The smoke scenarios against this PR's build, on both platforms.
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: cargo build --release --locked
+      - run: cargo test --release --locked
+      - run: tests/smoke.sh
+        env:
+          PREVIEW: ${{ github.workspace }}/target/release/preview
+          SMOKE_VITE: "1"

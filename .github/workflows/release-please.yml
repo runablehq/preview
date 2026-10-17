@@ -1,0 +1,28 @@
+name: release-please
+
+# Keeps a release PR open that bumps Cargo.toml, Cargo.lock, npm/*/package.json and
+# CHANGELOG.md from conventional commits. Merging it tags vX.Y.Z and creates the GitHub release;
+# the tag starts release.yml.
+#
+# A tag pushed with the default GITHUB_TOKEN does not start other workflows, so this needs
+# RELEASE_PLEASE_TOKEN: a GitHub App or fine-grained token with contents and pull-requests write.
+# Without it the release PR still opens, but merging it will not start release.yml; run that
+# by hand with the tag.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

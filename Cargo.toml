@@ -1,0 +1,18 @@
+[package]
+name = "preview"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Run any web app on a free port, restart it cleanly, and report where it listens."
+repository = "https://github.com/runablehq/preview"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

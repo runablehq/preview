@@ -1,0 +1,24 @@
+{
+  "name": "@runablehq/preview",
+  "version": "0.1.0",
+  "description": "Run any web app on a free port, restart it cleanly, and report where it listens.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/runablehq/preview.git"
+  },
+  "keywords": ["dev-server", "port", "preview", "agent", "process"],
+  "bin": {
+    "preview": "bin/preview"
+  },
+  "files": ["bin/preview", "README.md"],
+  "os": ["linux", "darwin"],
+  "optionalDependencies": {
+    "@runablehq/preview-darwin-arm64": "0.1.0",
+    "@runablehq/preview-darwin-x64": "0.1.0",
+    "@runablehq/preview-linux-arm64": "0.1.0",
+    "@runablehq/preview-linux-x64": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@runablehq/preview-linux-arm64",
+  "version": "0.1.0",
+  "description": "The preview binary for linux arm64. Install @runablehq/preview instead.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/runablehq/preview.git"
+  },
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": ["bin/preview"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

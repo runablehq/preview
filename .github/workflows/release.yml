@@ -1,0 +1,178 @@
+name: release
+
+# vX.Y.Z → build 4 targets → GitHub release → npm (dist-tag next) → smoke matrix installs from
+# npm → dist-tag latest. Running binaries pick up `latest` once auto-update ships (v0.2).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release again, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  PACKAGES: preview-linux-x64 preview-linux-arm64 preview-darwin-x64 preview-darwin-arm64 preview
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
+          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: Check the tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          [ "v$version" = "$TAG" ] || { echo "Cargo.toml has $version but the tag is $TAG"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: matrix.zig
+        uses: mlugg/setup-zig@v2
+      - if: matrix.zig
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build
+        run: |
+          if [ "${{ matrix.zig }}" = true ]; then
+            cargo zigbuild --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+      - name: Run it where the runner can
+        run: |
+          bin=target/${{ matrix.target }}/release/preview
+          file "$bin"
+          case "${{ matrix.target }}" in "$(uname -m)"-*) "$bin" --version | grep -qx "preview ${TAG#v}" ;; esac
+      - name: Package
+        run: |
+          mkdir dist
+          flags=""
+          [ "$(uname -s)" = Darwin ] && flags="--no-xattrs --no-mac-metadata"
+          # shellcheck disable=SC2086
+          tar $flags -czf dist/preview-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release preview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
+          cp scripts/install.sh dist/
+          (cd dist && sha256sum preview-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # release-please has usually created the release already; a hand-pushed tag has not.
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber
+
+  npm-publish:
+    needs: github-release
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or newer
+      - run: scripts/pack-npm.sh "${TAG#v}" dist out
+      - name: Publish with dist-tag next
+        run: |
+          # Platform packages first, so the main package never points at a missing version.
+          # A version already on npm is skipped, so a failed run can be rerun.
+          for pkg in $PACKAGES; do
+            if npm view "@runablehq/$pkg@${TAG#v}" version >/dev/null 2>&1; then
+              echo "@runablehq/$pkg@${TAG#v} is already published"
+              continue
+            fi
+            (cd "out/$pkg" && npm publish --provenance --access public --tag next)
+          done
+
+  smoke:
+    needs: npm-publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install from npm
+        run: |
+          # The registry can take a minute to serve a new version everywhere.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            npm install -g "@runablehq/preview@${TAG#v}" && break
+            [ "$attempt" = 10 ] && exit 1
+            sleep 15
+          done
+          preview --version
+          preview --version | grep -qx "preview ${TAG#v}"
+      - run: tests/smoke.sh
+        env:
+          SMOKE_VITE: "1"
+
+  promote:
+    needs: smoke
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: dist-tag latest
+        env:
+          # Trusted publishing covers npm publish only; moving a dist-tag needs a token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in $PACKAGES; do
+            npm dist-tag add "@runablehq/$pkg@${TAG#v}" latest
+          done
