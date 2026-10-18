@@ -1,183 +1,67 @@
-name: release
-
-# vX.Y.Z → build 4 targets → GitHub release → npm (dist-tag next) → smoke matrix installs from
-# npm → dist-tag latest. Running binaries pick up `latest` once auto-update ships (v0.2).
+name: diagnose-macos-smoke
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Tag to release again, e.g. v0.1.0
-        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
-
-env:
-  TAG: ${{ inputs.tag || github.ref_name }}
-  PACKAGES: preview-linux-x64 preview-linux-arm64 preview-darwin-x64 preview-darwin-arm64 preview
-
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
-          - { target: x86_64-apple-darwin, os: macos-14 }
-          - { target: aarch64-apple-darwin, os: macos-14 }
-    runs-on: ${{ matrix.os }}
+  diagnose:
+    runs-on: macos-15-intel
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TAG }}
-      - name: Check the tag matches Cargo.toml
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
-          [ "v$version" = "$TAG" ] || { echo "Cargo.toml has $version but the tag is $TAG"; exit 1; }
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - if: matrix.zig
-        uses: mlugg/setup-zig@v2
-      - if: matrix.zig
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
-      - name: Build
-        run: |
-          if [ "${{ matrix.zig }}" = true ]; then
-            cargo zigbuild --release --locked --target ${{ matrix.target }}
-          else
-            cargo build --release --locked --target ${{ matrix.target }}
-          fi
-      - name: Run it where the runner can
-        run: |
-          bin=target/${{ matrix.target }}/release/preview
-          file "$bin"
-          case "${{ matrix.target }}" in "$(uname -m)"-*) "$bin" --version | grep -qx "preview ${TAG#v}" ;; esac
-      - name: Package
-        run: |
-          mkdir dist
-          flags=""
-          [ "$(uname -s)" = Darwin ] && flags="--no-xattrs --no-mac-metadata"
-          # shellcheck disable=SC2086
-          tar $flags -czf dist/preview-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release preview
-      - uses: actions/upload-artifact@v4
-        with:
-          name: preview-${{ matrix.target }}
-          path: dist/*
-          if-no-files-found: error
-
-  github-release:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v5
-        with:
-          path: dist
-          merge-multiple: true
-      - run: |
-          cp scripts/install.sh dist/
-          (cd dist && sha256sum preview-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
-      - name: Upload
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # release-please has usually created the release already; a hand-pushed tag has not.
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
-          gh release upload "$TAG" dist/* --clobber
-
-  npm-publish:
-    needs: github-release
-    runs-on: ubuntu-24.04
-    environment: release
-    permissions:
-      contents: read
-      id-token: write # npm trusted publishing and provenance
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v5
-        with:
-          path: dist
-          merge-multiple: true
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or newer
-      - run: sh scripts/pack-npm.sh "${TAG#v}" dist out
-      - name: Publish with dist-tag next
+      - run: npm install -g @runablehq/preview@0.1.0
+      - name: Inspect Python DNS and socket startup
+        shell: bash
         run: |
-          # Platform packages first, so the main package never points at a missing version.
-          # A version already on npm is skipped, so a failed run can be rerun.
-          for pkg in $PACKAGES; do
-            if npm view "@runablehq/$pkg@${TAG#v}" version >/dev/null 2>&1; then
-              echo "@runablehq/$pkg@${TAG#v} is already published"
-              continue
-            fi
-            (cd "out/$pkg" && npm publish --provenance --access public --tag next)
-          done
-
-  smoke:
-    needs: npm-publish
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-      - name: Install from npm
-        run: |
-          # Registry scanning can delay the launcher and platform packages independently.
-          # npm can succeed while an optional platform package is still unavailable.
-          for attempt in $(seq 60); do
-            if npm install -g "@runablehq/preview@${TAG#v}" --prefer-online &&
-              preview --version 2>/dev/null | grep -qx "preview ${TAG#v}"; then
-              break
-            fi
-            [ "$attempt" = 60 ] && exit 1
-            sleep 15
-          done
+          set -uo pipefail
+          export PREVIEW_HOME="$(mktemp -d)"
+          export PREVIEW_HOST=127.0.0.1
+          work=$(mktemp -d)
+          cd "$work"
+          cleanup() {
+            for name in default ipv4 loopback; do preview stop "$name" || true; done
+            rm -rf "$PREVIEW_HOME" "$work"
+          }
+          trap cleanup EXIT
+          sw_vers
+          python3 --version
+          command -v python3
+          hostname
           preview --version
-          preview --version | grep -qx "preview ${TAG#v}"
-      - run: tests/smoke.sh
-        env:
-          SMOKE_VITE: "1"
-
-  promote:
-    needs: smoke
-    runs-on: ubuntu-24.04
-    environment: release
-    permissions:
-      contents: read
-      id-token: write # npm trusted publishing also authorizes dist-tag operations
-    steps:
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@12.2.0 # OIDC dist-tag support requires npm 12.2.0 or newer
-      - name: dist-tag latest
-        run: |
-          for pkg in $PACKAGES; do
-            npm dist-tag add "@runablehq/$pkg@${TAG#v}" latest
+          python3 -u - <<'PY'
+          import subprocess, sys
+          for address in ['', '0.0.0.0', '::', '127.0.0.1']:
+              code = ('import socket,time; start=time.monotonic(); '
+                      f'print(socket.getfqdn({address!r}),time.monotonic()-start,flush=True)')
+              child = subprocess.Popen([sys.executable, '-u', '-c', code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+              try:
+                  out, _ = child.communicate(timeout=8)
+                  print('getfqdn', repr(address), 'exit', child.returncode, out.strip(), flush=True)
+              except subprocess.TimeoutExpired:
+                  child.kill()
+                  out, _ = child.communicate()
+                  print('getfqdn', repr(address), 'TIMED OUT', out.strip(), flush=True)
+          PY
+          for spec in default:8765 ipv4:8766 loopback:8767; do
+            name=${spec%:*}
+            port=${spec#*:}
+            args=()
+            case "$name" in
+              ipv4) args=(--bind 0.0.0.0) ;;
+              loopback) args=(--bind 127.0.0.1) ;;
+            esac
+            echo "Probe $name on $port"
+            preview run --name "$name" --wait 5 -- python3 -m http.server "$port" "${args[@]}"
+            echo "preview exit: $?"
+            preview list
+            preview logs "$name" || true
+            /usr/sbin/lsof -nP -iTCP:"$port" || true
+            /usr/sbin/netstat -anv -p tcp | awk -v p=".$port" 'index($4,p) || index($5,p)'
+            curl -sS --max-time 2 -o /dev/null -w 'HTTP %{http_code}\n' "http://127.0.0.1:$port/" || true
+            preview stop "$name" || true
           done
