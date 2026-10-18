@@ -40,11 +40,15 @@ expected version before proceeding.
 
 ## Rolling back
 
+Deprecate the bad version and point `latest` at the good one, for all five packages:
+
 ```sh
 for p in preview preview-linux-x64 preview-linux-arm64 preview-darwin-x64 preview-darwin-arm64; do
+  npm deprecate "@runablehq/$p@<bad version>" "<reason>"
   npm dist-tag add "@runablehq/$p@<good version>" latest
 done
 ```
 
-New installs pick up the good version from then on. Auto-update, which moves machines that
-already have it installed, is v0.2.
+New installs get the good version right away. Machines that already run the bad one switch at
+their next update check, within about 6 hours (`preview upgrade` does it at once). Updaters
+read the platform packages, so the deprecation must be on those, not only on the main one.

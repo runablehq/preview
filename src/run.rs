@@ -121,7 +121,8 @@ pub fn run(opts: Options) -> u8 {
         .env("HOST", &host)
         .env("BROWSER", "none")
         .env("PYTHONUNBUFFERED", "1")
-        .env("NG_CLI_ANALYTICS", "false");
+        .env("NG_CLI_ANALYTICS", "false")
+        .env_remove("PREVIEW_HANDOFF");
     let fd_limit = signals::fd_limit();
     // SAFETY: child_setup only makes async-signal-safe calls.
     unsafe {

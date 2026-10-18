@@ -18,6 +18,10 @@ SMOKE_HTTP_SERVER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/http-server.py"
 export SMOKE_HTTP_SERVER
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/preview-smoke.XXXXXX")
 export PREVIEW_HOME="$WORK/home"
+# The binary under test, never a newer one it would update to. The update scenarios turn
+# this back on against a fake registry.
+export PREVIEW_UPDATE=0
+REGISTRY_PID=""
 FAILED=0
 PASSED=0
 
@@ -25,6 +29,7 @@ cleanup() {
   for name in $("$PREVIEW" list | python3 -c 'import json,sys; print(" ".join(p["name"] for p in json.load(sys.stdin) if p["running"]))'); do
     "$PREVIEW" stop "$name" >/dev/null
   done
+  [ -n "$REGISTRY_PID" ] && kill "$REGISTRY_PID" 2>/dev/null
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -224,6 +229,74 @@ if [ "${SMOKE_VITE:-0}" = 1 ]; then
   else
     bad "vite moves port" "exit $C1 $CODE, ports $V1 $V2" "$E1" "$ERR"
   fi
+fi
+
+# Auto-update, against a fake registry on port 8769 and a home of its own.
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) PLATFORM=linux-x64 ;;
+  Linux-aarch64 | Linux-arm64) PLATFORM=linux-arm64 ;;
+  Darwin-x86_64) PLATFORM=darwin-x64 ;;
+  Darwin-arm64) PLATFORM=darwin-arm64 ;;
+esac
+REG="$WORK/registry"
+REG_URL=http://127.0.0.1:8769
+FAKE="$(cd "$(dirname "$0")" && pwd)/registry.py"
+mkdir -p "$REG"
+(cd "$REG" && exec python3 "$SMOKE_HTTP_SERVER" 8769 --bind 127.0.0.1 >/dev/null 2>&1) &
+REGISTRY_PID=$!
+for _ in $(seq 50); do listening 8769 && break; sleep 0.1; done
+UPHOME="$WORK/uphome"
+mkdir -p "$UPHOME"
+up() { HOME="$UPHOME" PREVIEW_UPDATE=1 PREVIEW_REGISTRY=$REG_URL "$PREVIEW" "$@"; }
+# preview upgrade by the binary under test itself, not the fixture it would hand off to.
+upgrade_here() { PREVIEW_HANDOFF=smoke up upgrade 2>&1; }
+python3 "$FAKE" "$REG" publish "$PLATFORM" 9.9.8 "$REG_URL"
+python3 "$FAKE" "$REG" publish "$PLATFORM" 9.9.9 "$REG_URL"
+
+# Update: any command starts a background check, its own output untouched; the next run is the new version.
+OUT=$(up list)
+if python3 -c 'import json,sys; json.loads(sys.argv[1])' "$OUT"; then
+  for _ in $(seq 100); do [ "$(cat "$UPHOME/.runable/preview/current" 2>/dev/null)" = 9.9.9 ] && break; sleep 0.2; done
+  NEXT=$(up list)
+  if [ "$NEXT" = "fixture 9.9.9" ]; then
+    ok "update: installs latest in the background, next run hands off"
+  else
+    bad "update" "next run printed: $NEXT" "update.json: $(cat "$UPHOME/.runable/preview/update.json" 2>/dev/null)"
+  fi
+else
+  bad "update" "first run's stdout changed: $OUT"
+fi
+
+# Rollback: latest moves back and the active version is deprecated.
+python3 "$FAKE" "$REG" latest "$PLATFORM" 9.9.8
+python3 "$FAKE" "$REG" deprecate "$PLATFORM" 9.9.9
+OUT=$(upgrade_here)
+NEXT=$(up list)
+if echo "$OUT" | grep -q "Installed preview 9.9.8" && [ "$NEXT" = "fixture 9.9.8" ]; then
+  ok "rollback to the previous version"
+else
+  bad "rollback" "upgrade: $OUT" "next run: $NEXT"
+fi
+
+# A corrupted download is refused and changes nothing.
+python3 "$FAKE" "$REG" publish "$PLATFORM" 9.9.10 "$REG_URL"
+python3 "$FAKE" "$REG" corrupt "$PLATFORM" 9.9.10
+OUT=$(upgrade_here)
+CODE=$?
+if [ "$CODE" = 1 ] && echo "$OUT" | grep -q "sha512 mismatch" && [ "$(up list)" = "fixture 9.9.8" ] &&
+  grep -q lastError "$UPHOME/.runable/preview/update.json"; then
+  ok "update refuses a tarball that fails its integrity check"
+else
+  bad "integrity" "exit $CODE: $OUT"
+fi
+
+# Pin and opt-out.
+PINNED=$(PREVIEW_VERSION=9.9.9 up list)
+OFF=$(HOME="$UPHOME" PREVIEW_UPDATE=0 "$PREVIEW" --version)
+if [ "$PINNED" = "fixture 9.9.9" ] && echo "$OFF" | grep -q "updates off"; then
+  ok "PREVIEW_VERSION pins, PREVIEW_UPDATE=0 stays put"
+else
+  bad "pin and opt-out" "pinned: $PINNED" "off: $OFF"
 fi
 
 echo "# $PASSED passed, $FAILED failed"
