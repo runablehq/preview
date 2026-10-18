@@ -14,6 +14,8 @@
 set -u
 
 PREVIEW=${PREVIEW:-preview}
+SMOKE_HTTP_SERVER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/http-server.py"
+export SMOKE_HTTP_SERVER
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/preview-smoke.XXXXXX")
 export PREVIEW_HOME="$WORK/home"
 FAILED=0
@@ -102,7 +104,7 @@ else
 fi
 
 # Hard-coded port
-preview_in fixed1 run python3 -m http.server 8765
+preview_in fixed1 run python3 "$SMOKE_HTTP_SERVER" 8765
 FIXED1=$(field "$OUT" name 2>/dev/null)
 if [ "$CODE" = 0 ] && [ "$(field "$OUT" port)" = 8765 ] && http_ok 8765; then
   ok "hard-coded port"
@@ -111,7 +113,7 @@ else
 fi
 
 # Clash
-preview_in fixed2 run python3 -m http.server 8765
+preview_in fixed2 run python3 "$SMOKE_HTTP_SERVER" 8765
 if [ "$CODE" = 1 ] && echo "$ERR" | grep -q "held by preview $FIXED1" &&
   echo "$ERR" | grep -q "preview stop --port 8765"; then
   ok "clash names the holder"
@@ -121,7 +123,7 @@ fi
 "$PREVIEW" stop "$FIXED1" >/dev/null
 
 # $PORT expansion
-preview_in expand run -- python3 -m http.server '$PORT'
+preview_in expand run -- python3 "$SMOKE_HTTP_SERVER" '$PORT'
 P=$(field "$OUT" port 2>/dev/null)
 if [ "$CODE" = 0 ] && [ "$P" != 8000 ] && http_ok "$P"; then
   ok "\$PORT expansion ($P)"
@@ -131,7 +133,7 @@ fi
 "$PREVIEW" stop "$(field "$OUT" name 2>/dev/null)" >/dev/null 2>&1
 
 # bash features
-preview_in bash run 'source /dev/null && python3 -m http.server $PORT'
+preview_in bash run 'source /dev/null && python3 "$SMOKE_HTTP_SERVER" $PORT'
 if [ "$CODE" = 0 ] && http_ok "$(field "$OUT" port)"; then
   ok "bash features"
 else
@@ -141,7 +143,7 @@ fi
 
 # Loopback only. macOS defaults HOST to 127.0.0.1, so ask for 0.0.0.0 there.
 OUT=$(mkdir -p "$WORK/loop" && cd "$WORK/loop" &&
-  PREVIEW_HOST=0.0.0.0 "$PREVIEW" run python3 -m http.server 8766 --bind 127.0.0.1 2>"$WORK/stderr")
+  PREVIEW_HOST=0.0.0.0 "$PREVIEW" run python3 "$SMOKE_HTTP_SERVER" 8766 --bind 127.0.0.1 2>"$WORK/stderr")
 CODE=$?
 ERR=$(cat "$WORK/stderr")
 if [ "$CODE" = 1 ] && echo "$ERR" | grep -q "Port 8766 listens only on 127.0.0.1" &&
@@ -171,7 +173,7 @@ fi
 "$PREVIEW" stop "$SLOW" >/dev/null
 
 # Detached server
-preview_in detached run 'nohup python3 -m http.server 8767 >/dev/null 2>&1 &'
+preview_in detached run 'nohup python3 "$SMOKE_HTTP_SERVER" 8767 >/dev/null 2>&1 &'
 NAME=$(field "$OUT" name 2>/dev/null)
 if [ "$CODE" = 0 ] && [ "$(field "$OUT" port)" = 8767 ] && http_ok 8767; then
   "$PREVIEW" stop "$NAME" >/dev/null
@@ -181,7 +183,7 @@ else
 fi
 
 # stop --port on a server no preview started
-python3 -m http.server 8768 >/dev/null 2>&1 &
+python3 "$SMOKE_HTTP_SERVER" 8768 >/dev/null 2>&1 &
 LOOSE=$!
 for _ in $(seq 50); do listening 8768 && break; sleep 0.1; done
 STOP=$("$PREVIEW" stop --port 8768)
@@ -196,10 +198,10 @@ STOP=$("$PREVIEW" stop --port 8768)
 if [ "$STOP" = "Nothing listens on port 8768." ]; then ok "stop --port on a free port"; else bad "stop --port on a free port" "$STOP"; fi
 
 # --port busy
-python3 -m http.server 8768 >/dev/null 2>&1 &
+python3 "$SMOKE_HTTP_SERVER" 8768 >/dev/null 2>&1 &
 LOOSE=$!
 for _ in $(seq 50); do listening 8768 && break; sleep 0.1; done
-preview_in busy run --port 8768 -- python3 -m http.server '$PORT'
+preview_in busy run --port 8768 -- python3 "$SMOKE_HTTP_SERVER" '$PORT'
 if [ "$CODE" = 1 ] && echo "$ERR" | grep -q "Port 8768 is held by pid $LOOSE"; then
   ok "--port busy names the holder"
 else
