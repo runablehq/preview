@@ -33,6 +33,7 @@ preview stop <name>
 preview stop --port <port>
 preview list
 preview logs <name> [--lines <count>]
+preview upgrade
 preview --version
 ```
 
@@ -137,8 +138,35 @@ cargo build --release && PREVIEW=target/release/preview tests/smoke.sh   # SMOKE
 and macOS for every PR; the release runs it again against the package installed from npm.
 Releasing is described in [RELEASING.md](RELEASING.md).
 
+## Updates
+
+`preview` keeps itself on npm's `latest` with no setup, however it was installed (npm, curl,
+a binary copied into an image, a read-only `/usr/local/bin`):
+
+- After any command, when the last check is more than 6 hours old, it starts a detached
+  background check and exits without waiting. The check downloads the new version of this
+  platform's package, checks its sha512 against the registry, checks that it runs, and
+  installs it under `~/.runable/preview/versions/`.
+- At start, a binary hands off to the newest installed version, so the next command runs it.
+- A rollback works the same way: deprecate the bad version on npm and move `latest` back.
+  Machines on the deprecated version switch to `latest` at their next check.
+
+Updates never write to stdout, never slow a command down, and never touch running previews.
+
+| Control | Effect |
+| --- | --- |
+| `PREVIEW_UPDATE=0` | no checks, no hand-off: the installed binary runs as is |
+| `PREVIEW_VERSION=<v>` | run exactly `<v>`, installing it if needed |
+| `PREVIEW_REGISTRY=<url>` | fetch from a registry mirror instead of registry.npmjs.org |
+| `preview upgrade` | check now, in the foreground, and say what happened |
+| `preview --version` | `preview 0.4.1 (installed 0.3.0, checked 2 h ago)` |
+
+Downloads honor `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`. They trust the system's
+certificates first, then Mozilla's bundled roots.
+
 ## Not yet
 
-v0.1 has no auto-update, signatures, `preview upgrade`, adoption of servers that detach from
-the tree (pm2, `docker compose up -d`), the host-check probe (`hostCheck`), or HTTP-based port
-choice. Those are milestones v0.2 and v0.3 of the design. Windows is not supported.
+Updates are not signed yet. A version is trusted if npm serves it with a matching sha512, and
+releases come only from this repository's release workflow through npm trusted publishing.
+Also missing: adoption of servers that detach from the tree (pm2, `docker compose up -d`), the
+host-check probe (`hostCheck`), and HTTP-based port choice. Windows is not supported.

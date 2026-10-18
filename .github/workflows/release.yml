@@ -60,7 +60,7 @@ jobs:
         run: |
           bin=target/${{ matrix.target }}/release/preview
           file "$bin"
-          case "${{ matrix.target }}" in "$(uname -m)"-*) "$bin" --version | grep -qx "preview ${TAG#v}" ;; esac
+          case "${{ matrix.target }}" in "$(uname -m)"-*) PREVIEW_UPDATE=0 "$bin" --version | grep -E "^preview ${TAG#v}( |$)" ;; esac
       - name: Package
         run: |
           mkdir dist
@@ -153,14 +153,14 @@ jobs:
           # npm can succeed while an optional platform package is still unavailable.
           for attempt in $(seq 60); do
             if npm install -g "@runablehq/preview@${TAG#v}" --prefer-online &&
-              preview --version 2>/dev/null | grep -qx "preview ${TAG#v}"; then
+              PREVIEW_UPDATE=0 preview --version 2>/dev/null | grep -qE "^preview ${TAG#v}( |$)"; then
               break
             fi
             [ "$attempt" = 60 ] && exit 1
             sleep 15
           done
           preview --version
-          preview --version | grep -qx "preview ${TAG#v}"
+          PREVIEW_UPDATE=0 preview --version | grep -E "^preview ${TAG#v}( |$)"
       - run: tests/smoke.sh
         env:
           SMOKE_VITE: "1"

@@ -8,6 +8,7 @@ mod run;
 mod signals;
 mod state;
 mod stop;
+mod update;
 
 #[cfg(target_os = "linux")]
 #[path = "tree_linux.rs"]
@@ -30,25 +31,38 @@ Usage:
   preview stop --port <port>
   preview list
   preview logs <name> [--lines <count>]
+  preview upgrade
   preview --version
 
 preview run starts <command> from the current folder with PORT set to a free port, waits until
 it listens, and prints one JSON line: {\"name\",\"port\",\"ports\",\"pid\",\"url\",\"log\"}.
 Run the same command again to restart it. A single argument runs as a bash script; with several,
-$PORT and $HOST inside them are filled in.";
+$PORT and $HOST inside them are filled in.
+
+preview keeps itself on the latest release: a newer installed version takes over at start,
+and a background check every 6 hours installs new ones. PREVIEW_UPDATE=0 turns that off,
+PREVIEW_VERSION=<v> pins a version, and preview upgrade checks now.";
 
 fn main() -> ExitCode {
+    update::hand_off();
     let args: Vec<String> = std::env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    match dispatch(&args) {
-        Ok(code) => ExitCode::from(code),
+    let code = match dispatch(&args) {
+        Ok(code) => code,
         Err(msg) => {
             eprintln!("{msg}");
-            ExitCode::from(1)
+            1
         }
+    };
+    if !matches!(
+        args.first().map(String::as_str),
+        Some("__update" | "upgrade")
+    ) {
+        update::after_command();
     }
+    ExitCode::from(code)
 }
 
 fn dispatch(args: &[String]) -> Result<u8, String> {
@@ -65,9 +79,14 @@ fn dispatch(args: &[String]) -> Result<u8, String> {
         }
         "logs" | "log" => logs(rest),
         "--version" | "-V" | "version" => {
-            json::print(&format!("preview {}", env!("CARGO_PKG_VERSION")));
+            json::print(&update::version_line());
             Ok(0)
         }
+        "upgrade" => {
+            no_more(rest)?;
+            Ok(update::upgrade())
+        }
+        "__update" => Ok(update::background()),
         "--help" | "-h" | "help" => {
             json::print(USAGE);
             Ok(0)
