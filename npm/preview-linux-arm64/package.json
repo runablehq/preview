@@ -6,9 +6,15 @@
     "type": "git",
     "url": "git+https://github.com/runablehq/preview.git"
   },
-  "os": ["linux"],
-  "cpu": ["arm64"],
-  "files": ["bin/preview"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/preview"
+  ],
   "publishConfig": {
     "access": "public"
   }
