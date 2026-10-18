@@ -118,7 +118,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or newer
-      - run: scripts/pack-npm.sh "${TAG#v}" dist out
+      - run: sh scripts/pack-npm.sh "${TAG#v}" dist out
       - name: Publish with dist-tag next
         run: |
           # Platform packages first, so the main package never points at a missing version.
