@@ -19,6 +19,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           export PREVIEW_HOME="$(mktemp -d)"
           export PREVIEW_HOST=127.0.0.1
           work=$(mktemp -d)
@@ -32,6 +33,7 @@ jobs:
           python3 --version
           command -v python3
           hostname
+          cat /etc/hosts
           preview --version
           python3 -u - <<'PY'
           import subprocess, sys
@@ -47,16 +49,22 @@ jobs:
                   out, _ = child.communicate()
                   print('getfqdn', repr(address), 'TIMED OUT', out.strip(), flush=True)
           PY
+          python3 -u -c 'import faulthandler,runpy,sys; faulthandler.dump_traceback_later(3); sys.argv=["http.server","8769"]; runpy.run_module("http.server",run_name="__main__")' > "$work/python-stack.log" 2>&1 &
+          server_pid=$!
+          sleep 4
+          kill "$server_pid" || true
+          wait "$server_pid" || true
+          cat "$work/python-stack.log"
           for spec in default:8765 ipv4:8766 loopback:8767; do
             name=${spec%:*}
             port=${spec#*:}
-            args=()
+            set -- python3 -m http.server "$port"
             case "$name" in
-              ipv4) args=(--bind 0.0.0.0) ;;
-              loopback) args=(--bind 127.0.0.1) ;;
+              ipv4) set -- "$@" --bind 0.0.0.0 ;;
+              loopback) set -- "$@" --bind 127.0.0.1 ;;
             esac
             echo "Probe $name on $port"
-            preview run --name "$name" --wait 5 -- python3 -m http.server "$port" "${args[@]}"
+            preview run --name "$name" --wait 5 -- "$@"
             echo "preview exit: $?"
             preview list
             preview logs "$name" || true
