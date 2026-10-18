@@ -6,12 +6,24 @@
     "type": "git",
     "url": "git+https://github.com/runablehq/preview.git"
   },
-  "keywords": ["dev-server", "port", "preview", "agent", "process"],
+  "keywords": [
+    "dev-server",
+    "port",
+    "preview",
+    "agent",
+    "process"
+  ],
   "bin": {
     "preview": "bin/preview"
   },
-  "files": ["bin/preview", "README.md"],
-  "os": ["linux", "darwin"],
+  "files": [
+    "bin/preview",
+    "README.md"
+  ],
+  "os": [
+    "linux",
+    "darwin"
+  ],
   "optionalDependencies": {
     "@runablehq/preview-darwin-arm64": "0.1.0",
     "@runablehq/preview-darwin-x64": "0.1.0",
