@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/runablehq/preview/compare/v0.1.0...v0.2.0) (2026-10-18)
+
+
+### Features
+
+* keep preview on npm's latest by itself ([#2](https://github.com/runablehq/preview/issues/2)) ([ba307ce](https://github.com/runablehq/preview/commit/ba307ce9ab8709d5aa1c00631a85620d6f18fe1c))
+
 ## 0.1.0 (2026-10-18)
 
 
