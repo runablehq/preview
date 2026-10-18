@@ -73,3 +73,8 @@ jobs:
             curl -sS --max-time 2 -o /dev/null -w 'HTTP %{http_code}\n' "http://127.0.0.1:$port/" || true
             preview stop "$name" || true
           done
+      - uses: actions/checkout@v5
+      - name: Validate DNS-independent fixture against published binary
+        run: bash .github/diagnostics/smoke.sh
+        env:
+          SMOKE_VITE: "1"
