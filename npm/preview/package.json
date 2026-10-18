@@ -1,6 +1,6 @@
 {
   "name": "@runablehq/preview",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run any web app on a free port, restart it cleanly, and report where it listens.",
   "repository": {
     "type": "git",
