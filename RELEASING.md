@@ -29,9 +29,14 @@ already on npm are skipped.
   0.1.0 of each package once by hand: `scripts/pack-npm.sh 0.1.0 <tarballs> out`, then
   `npm publish --access public` in each folder. After that, add a trusted publisher on
   npmjs.com for each of the five packages: repository `runablehq/preview`, workflow
-  `release.yml`, environment `release`.
-- **`NPM_TOKEN`** in the `release` environment, for `promote` only. Trusted publishing covers
-  `npm publish`, not `npm dist-tag`.
+  `release.yml`, environment `release`. Allow both `npm publish` and `npm dist-tag`.
+- **Tokenless npm publishing and promotion.** Both jobs use GitHub Actions OIDC with
+  `id-token: write`. Promotion uses npm 12.2.0 or newer for OIDC dist-tag support, so no
+  `NPM_TOKEN` secret is needed.
+
+Registry scanning can delay a newly published version and its platform packages independently.
+The smoke jobs retry for about 15 minutes and require the installed native binary to report the
+expected version before proceeding.
 
 ## Rolling back
 

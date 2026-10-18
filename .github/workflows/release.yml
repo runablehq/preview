@@ -147,10 +147,14 @@ jobs:
           node-version: 24
       - name: Install from npm
         run: |
-          # The registry can take a minute to serve a new version everywhere.
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            npm install -g "@runablehq/preview@${TAG#v}" && break
-            [ "$attempt" = 10 ] && exit 1
+          # Registry scanning can delay the launcher and platform packages independently.
+          # npm can succeed while an optional platform package is still unavailable.
+          for attempt in $(seq 60); do
+            if npm install -g "@runablehq/preview@${TAG#v}" --prefer-online &&
+              preview --version 2>/dev/null | grep -qx "preview ${TAG#v}"; then
+              break
+            fi
+            [ "$attempt" = 60 ] && exit 1
             sleep 15
           done
           preview --version
@@ -163,15 +167,16 @@ jobs:
     needs: smoke
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing also authorizes dist-tag operations
     steps:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@12.2.0 # OIDC dist-tag support requires npm 12.2.0 or newer
       - name: dist-tag latest
-        env:
-          # Trusted publishing covers npm publish only; moving a dist-tag needs a token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for pkg in $PACKAGES; do
             npm dist-tag add "@runablehq/$pkg@${TAG#v}" latest
