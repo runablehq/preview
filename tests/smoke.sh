@@ -278,6 +278,17 @@ else
   bad "rollback" "upgrade: $OUT" "next run: $NEXT"
 fi
 
+# A candidate that prints its version but exits unsuccessfully is not a working install.
+python3 "$FAKE" "$REG" publish-fails "$PLATFORM" 9.9.10 "$REG_URL"
+OUT=$(upgrade_here)
+CODE=$?
+if [ "$CODE" = 1 ] && echo "$OUT" | grep -q "exit status: 23" &&
+  [ "$(cat "$UPHOME/.runable/preview/current")" = 9.9.8 ] && [ "$(up list)" = "fixture 9.9.8" ]; then
+  ok "update rejects a binary that exits from --version"
+else
+  bad "nonzero version check" "exit $CODE: $OUT" "current: $(cat "$UPHOME/.runable/preview/current" 2>/dev/null)"
+fi
+
 # A corrupted download is refused and changes nothing.
 python3 "$FAKE" "$REG" publish "$PLATFORM" 9.9.10 "$REG_URL"
 python3 "$FAKE" "$REG" corrupt "$PLATFORM" 9.9.10

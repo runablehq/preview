@@ -2,6 +2,7 @@
 """A static stand-in for the npm registry, for the update scenarios in smoke.sh.
 
     registry.py <root> publish <platform> <version>    adds a fixture version and makes it latest
+    registry.py <root> publish-fails <platform> <version> adds a failing --version binary
     registry.py <root> latest <platform> <version>     moves dist-tag latest
     registry.py <root> deprecate <platform> <version>  marks a version deprecated
     registry.py <root> corrupt <platform> <version>    breaks a version's integrity
@@ -28,8 +29,9 @@ def main():
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {
         "name": name, "dist-tags": {}, "versions": {}}
 
-    if action == "publish":
-        script = (f'#!/bin/sh\nif [ "$1" = --version ]; then echo "preview {version}"; exit 0; fi\n'
+    if action in {"publish", "publish-fails"}:
+        code = 23 if action == "publish-fails" else 0
+        script = (f'#!/bin/sh\nif [ "$1" = --version ]; then echo "preview {version}"; exit {code}; fi\n'
                   f'echo "fixture {version}"\n').encode()
         tgz = tarball({"package/package.json": json.dumps({"name": name, "version": version}).encode(),
                        "package/bin/preview": script})

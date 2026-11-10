@@ -464,9 +464,9 @@ fn run_version(bin: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("cannot run the new binary: {e}"))?;
     let until = Instant::now() + Duration::from_secs(5);
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < until => sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
@@ -476,6 +476,9 @@ fn run_version(bin: &Path) -> Result<String, String> {
                 ));
             }
         }
+    };
+    if !status.success() {
+        return Err(format!("the new binary exited with {status} for --version"));
     }
     let mut out = String::new();
     if let Some(mut stdout) = child.stdout.take() {
